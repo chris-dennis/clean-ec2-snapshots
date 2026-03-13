@@ -4,18 +4,12 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
-variable "subnet_a_cidr" {
+variable "vpc_id" {
   type        = string
-  description = "CIDR block for Private Subnet A"
+  description = "ID of the existing Main VPC"
 }
 
-variable "subnet_b_cidr" {
-  type        = string
-  description = "CIDR block for Private Subnet B"
-}
-
-variable "vpc_cidr" {
-  type        = string
-  description = "CIDR block for Main VPC"
-  default     = "10.0.0.0/16"
+variable "subnet_ids" {
+  type        = list(string)
+  description = "IDs of the existing private subnets to attach the Lambda to"
 }

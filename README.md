@@ -24,7 +24,7 @@ To schedule the task, we use an **Amazon EventBridge Rule** with a `cron()` expr
 
 ### Observability
 
-The Lambda function uses standard Python `logging` to write to **Amazon CloudWatch Logs**. AWS X-Ray was evaluated and deemed unnecessary — this is a standalone asynchronous script with no downstream microservice calls or fan-out, so distributed tracing adds cost without value. Standard structured logging is sufficient. A dedicated CloudWatch Log Group with a 14-day retention policy is provisioned by OpenTofu.
+The Lambda function uses standard Python `logging` to write to **Amazon CloudWatch Logs**. AWS X-Ray was evaluated and deemed unnecessary — this is a standalone asynchronous script with no downstream microservice calls or fan-out, so distributed tracing adds cost without value.
 
 ### Safety Measures
 
@@ -63,7 +63,7 @@ pip install -r requirements-test.txt
 pytest tests/ -v
 ```
 
-The suite covers six cases: deleting an old unattached snapshot; skipping a recent snapshot; skipping an old snapshot whose derived volume is attached to a running instance; skipping an AMI-backed snapshot; handling an `InvalidSnapshot.InUse` error returned by the API; and logging errors on any other unexpected `ClientError`.
+The suite covers six cases: deleting an old unattached snapshot; skipping a recent snapshot; deleting an old snapshot whose only relationship is a derived volume (the volume is independent); skipping an AMI-backed snapshot; handling an `InvalidSnapshot.InUse` error returned by the API; and logging errors on any other unexpected `ClientError`.
 
 ---
 
@@ -104,12 +104,12 @@ Packaging and deployment of the Lambda code are handled entirely by OpenTofu. Th
 
 ### VPC Configuration
 
-The Lambda function runs inside a custom "Main" VPC with no internet access.
+The Lambda function attaches to an existing "Main" VPC and private subnets — this module does not create them. The VPC and subnet IDs are supplied via `tf/environments/dev.tfvars` and passed in as variables.
 
-- **Subnets:** Attached to two private subnets (`us-west-2a` and `us-west-2b`), defined via `vpc_config` in `tf/main.tf`.
-- **Security Groups:** A dedicated security group (`lambda_sg`) allows only outbound HTTPS (port 443) to reach AWS service endpoints.
+- **Subnets:** Configured via `var.subnet_ids` in `vpc_config`. One or more private subnet IDs can be supplied.
+- **Security Groups:** A dedicated security group (`lambda_sg`) is provisioned by this module, allowing only outbound HTTPS (port 443).
 - **VPC Endpoints:** Because the Lambda runs in a private subnet with no Internet Gateway or NAT Gateway, VPC Interface Endpoints are provisioned in `tf/network.tf` for every AWS service the function contacts:
-  - `com.amazonaws.us-west-2.ec2` — for all snapshot and instance API calls
+  - `com.amazonaws.us-west-2.ec2` — for all snapshot and AMI API calls
   - `com.amazonaws.us-west-2.logs` — for CloudWatch Logs output
 
   Both endpoints use `private_dns_enabled = true`, so the AWS SDK resolves the standard service hostnames to the VPC endpoint ENIs automatically — no code changes required. Both share a single security group that restricts ingress to port 443 from the Lambda security group only.
@@ -129,6 +129,7 @@ The IAM role follows the **Principle of Least Privilege**:
 The following assumptions were made during implementation:
 
 - **AWS Region:** `us-west-2`, as configured in `tf/environments/dev.tfvars`. Changeable per environment.
+- **Existing VPC and Subnets:** This module attaches to pre-existing infrastructure. The `vpc_id` and `subnet_ids` in `dev.tfvars` must be updated to match the actual IDs in the target AWS account before applying.
 - **Single Account:** The function operates within a single AWS account. Cross-account snapshot cleanup would require additional IAM trust relationships.
 - **Python Runtime:** Python 3.12 is available in the target AWS Lambda runtime. The function has no external dependencies beyond `boto3`, which is pre-installed in the Lambda execution environment.
 - **Remote State Backend:** This configuration does not include a `backend` block. For any shared or production use, a remote backend should be configured — for example, an S3 bucket with DynamoDB state locking:
@@ -155,4 +156,3 @@ The Lambda function's execution is monitored via **Amazon CloudWatch**:
 
 - **Logs:** A dedicated Log Group (`/aws/lambda/CleanEC2Snapshots`) with a 14-day retention policy is created by OpenTofu. Each invocation logs the cutoff date, the number of snapshots evaluated, deleted, and skipped, plus any errors.
 - **Metrics:** CloudWatch automatically tracks Lambda metrics: `Invocations`, `Duration`, `Errors`, and `Throttles`. A CloudWatch Alarm on the `Errors` metric can alert the team if the function fails during a scheduled run.
-- **X-Ray:** Not enabled. This is a single-function, single-service workflow. The overhead of X-Ray tracing is not warranted here.

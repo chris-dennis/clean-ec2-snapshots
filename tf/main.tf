@@ -72,7 +72,7 @@ resource "aws_lambda_function" "snapshot_cleaner" {
   timeout          = 300 # 5 minutes
 
   vpc_config {
-    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+    subnet_ids         = var.subnet_ids
     security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
